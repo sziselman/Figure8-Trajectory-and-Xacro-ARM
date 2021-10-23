@@ -1,0 +1,68 @@
+#!/usr/bin/env python
+""" 
+Publishes to the angles of the joints to keep the two-link arm moving in a straight-line trajectory.
+
+PUBLISHERS:
+  + joint_states (sensor_msgs/JointState) ~ the angles of joint1 and joint2
+PARAMETERS:
+  + length1 (float) ~ the length of link1
+  + length2 (float) ~ the length of link2
+  + T (float) ~ the period
+"""
+
+import rospy
+import math
+from sensor_msgs.msg import JointState
+from std_msgs.msg import Header
+
+class ArmTrajectory:
+    def __init__(self):
+        # parameters
+        self.len1 = rospy.get_param("length1")
+        self.len2 = rospy.get_param("length2")
+        self.T = rospy.get_param("arm_period")
+
+        # subs, pubs, servs, etc.
+        self.joint_pub = rospy.Publisher("joint_states", JointState, queue_size=10)
+        self.tmr = rospy.Timer(rospy.Duration(0.05), self.timer_callback)
+        
+        # variables
+        self.h = (2/3) * (self.len1 + self.len2)
+
+    def timer_callback(self, event):
+        """
+        The timer_callback() function
+        """
+        # calculate trajectory values
+        t = rospy.Time.now().to_sec()
+        x = 0.9 * math.cos(2 * math.pi * t / self.T) * math.sqrt((self.len1 + self.len2)**2 - self.h**2)
+        y = (2/3) * (self.len1 + self.len2)
+
+        # use trajectory values to caculate for th1 and th2
+        D = (x**2 + y**2 - self.len1**2 - self.len2**2) / (2 * self.len1 * self.len2)
+        th2 = math.atan2(math.sqrt(1 - D**2), D)
+        th1 = math.atan2(y, x) - math.atan2(self.len2 * math.sin(th2), self.len1 + self.len2 * math.cos(th2))
+
+        # publish the joint state message
+        joint_msg = JointState()
+        joint_msg.header.stamp = rospy.Time.now()
+        joint_msg.name = ['base_joint', 'link_joint']
+        joint_msg.position = [th1, th2]
+        joint_msg.velocity = []
+        joint_msg.effort = []
+
+        self.joint_pub.publish(joint_msg)
+
+        return
+
+def main():
+    """ the main() function """
+    rospy.init_node('arm_traj')
+    arm_traj = ArmTrajectory()
+    rospy.spin()
+
+if __name__ == '__main__':
+    try:
+        main()
+    except rospy.ROSInterruptException:
+        pass

@@ -1,0 +1,111 @@
+#!/usr/bin/env python
+"""
+SUBSCRIBERS:
+    + turtle1/pose (turtlesim/Pose) ~ the x, y, theta of the turtle
+PUBLISHERS:
+    + odom_path (nav_msgs/Odometry) ~ corresponding odometry message of the turtlesim node
+"""
+
+import rospy
+import tf2_ros
+import tf_conversions
+from geometry_msgs.msg import Vector3, TransformStamped, Pose, Point, Quaternion, Twist
+import turtlesim.msg
+from nav_msgs.msg import Odometry
+
+class SimOdom:
+    def __init__(self):
+        # subs, pubs, servs, etc.
+        rospy.Subscriber("turtle1/pose", turtlesim.msg.Pose, self.pose_callback)
+        self.odom_pub = rospy.Publisher("odom", Odometry, queue_size = 10)
+        self.tmr = rospy.Timer(rospy.Duration(0.01), self.timer_callback)
+        self.broadcaster = tf2_ros.TransformBroadcaster()
+
+        # variables
+        self.ninja_turtle = turtlesim.msg.Pose()
+        self.x_prev = 0.0
+        self.y_prev = 0.0
+        self.th_prev = 0.0
+        self.last_time = rospy.Time.now()
+        self.frame_id = "odom"
+        self.child_frame_id = "base_footprint"
+
+    def pose_callback(self, data):
+        """
+        pose_callback() function
+        """
+        rospy.logdebug("pose received!!")
+        self.ninja_turtle = data
+
+    def timer_callback(self, event):
+        """
+        timer_callback() function
+        """
+        current_time = rospy.Time.now()
+
+        # offset the x,y value such that they are at the center of the rviz simulator
+        x = self.ninja_turtle.x - 5.5
+        y = self.ninja_turtle.y - 5.5
+        th = self.ninja_turtle.theta
+
+        # get the twist components
+        dt = (current_time - self.last_time).to_sec()
+        vx = x - self.x_prev
+        vy = y - self.y_prev
+        vth = th - self.th_prev
+
+        # broadcast the transform
+        t = TransformStamped()
+        t.header.stamp = current_time
+        t.header.frame_id = self.frame_id
+        t.child_frame_id = self.child_frame_id
+        t.transform.translation.x = x
+        t.transform.translation.y = y
+        t.transform.translation.z = 0.0
+
+        q = tf_conversions.transformations.quaternion_from_euler(0.0, 0.0, th)
+        t.transform.rotation.x = q[0]
+        t.transform.rotation.y = q[1]
+        t.transform.rotation.z = q[2]
+        t.transform.rotation.w = q[3]
+
+        self.broadcaster.sendTransform(t)
+
+        # publish the corresponding Odometry message
+        odom_msg = Odometry()
+        odom_msg.header.stamp = current_time
+        odom_msg.header.frame_id = self.frame_id
+        odom_msg.child_frame_id = self.child_frame_id
+        odom_msg.pose.pose.position.x = x
+        odom_msg.pose.pose.position.y = y
+        odom_msg.pose.pose.position.z = 0.0
+        odom_msg.pose.pose.orientation.x = q[0]
+        odom_msg.pose.pose.orientation.y = q[1]
+        odom_msg.pose.pose.orientation.z = q[2]
+        odom_msg.pose.pose.orientation.w = q[3]
+
+        odom_msg.twist.twist.linear = Vector3(vx, vy, 0.0)
+        odom_msg.twist.twist.angular = Vector3(0.0, 0.0, vth)
+
+        self.odom_pub.publish(odom_msg)
+
+        # update previous values
+        self.x_prev = x
+        self.y_prev = y
+        self.th_prev = th
+        self.last_time = current_time
+
+        return  
+
+def main():
+    """ the main() function """
+    rospy.init_node('simodom')
+    simodom = SimOdom()
+    rospy.spin()
+
+if __name__ == '__main__':
+    try:
+        main()
+    except rospy.ROSInterruptException:
+        pass
+

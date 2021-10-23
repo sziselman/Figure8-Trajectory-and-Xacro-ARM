@@ -1,0 +1,24 @@
+<launch>
+    <rosparam command="load" file="$(find homework2)/config/trajectory.yaml"/>
+    <param name="robot_description" command="xacro '$(find homework2)/urdf/turtlebot3_burger.urdf.xacro'"/>
+
+    <arg name="mode" default="sim" doc="determines if the nodes are launched in turtlesim or in real life"/>
+
+    <node name="trajectory" pkg="homework2" type="trajectory">
+        <param name="~pub_freq" value="100"/>
+    </node>
+
+    <group if="$(eval arg('mode') == 'sim')">
+        <param name="turtle_topic" value="/turtle1/cmd_vel"/>
+        <node name="turtlesim_node" pkg="turtlesim" type="turtlesim_node"/>
+        <node name="simodom" pkg="homework2" type="simodom"/>
+        <node name="joint_state_publisher" pkg="joint_state_publisher" type="joint_state_publisher"/>
+        <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher"/>
+        <node name="rviz" pkg="rviz" type="rviz" args="-d '$(find homework2)/config/turtle_view.rviz'"/>
+    </group>
+
+    <group if="$(eval arg('mode') == 'real')">
+        <param name="turtle_topic" value="/cmd_vel"/>
+        <!-- <include file="$(find turtlebot3_bringup)/launch/turtlebot3_remote.launch"/> -->
+    </group>
+</launch>

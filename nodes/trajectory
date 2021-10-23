@@ -1,0 +1,117 @@
+#!/usr/bin/env python
+"""
+PUBLISHERS:
+    + cmd_vel (geometry_msgs/Twist) ~ the linear and angular velocity command to the turtlebot
+SERVICES:
+    + pause (std_srvs/Empty) ~ stops the turtlebot's motion, in a way that the trajectory can be resumed
+    + resume (std_srvs/Empty) ~ resumes the turtlebot's motion along the trajectory
+PARAMETERS:
+    + width (double) ~ the width of the figure eight
+    + height (double) ~ the height of the figure eight
+    + period (double) ~ the amount of times it takes to complete the figure eight
+    + pub_freq (int) ~ the frequency at which to publish messages (private)
+"""
+
+import rospy
+import tf2_ros
+import tf_conversions
+from geometry_msgs.msg import Twist, Vector3, TransformStamped
+from std_srvs.srv import Empty, EmptyResponse
+from trajectory_pkg.trajectory import FigureEight, calculate_control
+
+class Trajectory:
+    def __init__(self):
+        # parameters
+        self.width = rospy.get_param("width")
+        self.height = rospy.get_param("height")
+        self.period = rospy.get_param("period")
+        self.frequency = rospy.get_param("~pub_freq")
+        self.turtle_topic = rospy.get_param("turtle_topic")
+
+        # subs, pubs, servs, etc.
+        self.cmd_pub = rospy.Publisher(self.turtle_topic, Twist, queue_size = 10)
+        self.pause = rospy.Service("pause", Empty, self.pause_callback)
+        self.resume = rospy.Service("resume", Empty, self.resume_callback)
+        self.tmr = rospy.Timer(rospy.Duration(1/self.frequency), self.timer_callback)
+        self.broadcaster = tf2_ros.TransformBroadcaster()
+
+        # variables
+        self.paused = True
+        self.paused_duration = 0.0
+        self.paused_time = 0.0
+
+        self.figure_eight = FigureEight(self.width, self.height, self.period)
+
+    def pause_callback(self, req):
+        """
+        pause callback function
+        """
+
+        self.paused_time = rospy.get_time()
+
+        # turns on the paused flag
+        self.paused = True
+
+        return EmptyResponse()
+
+    def resume_callback(self, req):
+        """
+        resume callback function
+        """
+        self.paused_duration += rospy.get_time() - self.paused_time
+        # turns off the paused flag
+        self.paused = False
+
+        return EmptyResponse()
+    
+    def timer_callback(self, event):
+        """
+        timer callback function
+        """
+
+        # broadcasts a static transform from world to odom
+        t = TransformStamped()
+        t.header.stamp = rospy.Time.now()
+        t.header.frame_id = "world"
+        t.child_frame_id = "odom"
+        t.transform.translation.x = 0.0
+        t.transform.translation.y = 0.0
+        t.transform.translation.z = 0.0
+        q = tf_conversions.transformations.quaternion_from_euler(0, 0, 0)
+        t.transform.rotation.x = q[0]
+        t.transform.rotation.y = q[1]
+        t.transform.rotation.z = q[2]
+        t.transform.rotation.w = q[3]
+        
+        self.broadcaster.sendTransform(t)
+        
+        # if paused service is called
+        if self.paused == True:
+            # send a zero twist message, don't move to the next "time stamp"
+            cmd_msg = Twist(Vector3(0.0, 0.0, 0.0), Vector3(0.0, 0.0, 0.0))
+
+        # if paused service is not called
+        else:
+            time = rospy.get_time() - self.paused_duration
+            rospy.logdebug("total paused time is %s", self.paused_duration)
+            rospy.logdebug("time inputted is %s", time)
+
+            trajectory_vals = self.figure_eight.find_trajectory(time)
+            cmd_vals = calculate_control(trajectory_vals)
+            cmd_msg = Twist(Vector3(cmd_vals.linear, 0.0, 0.0), Vector3(0.0, 0.0, cmd_vals.angular))
+
+        self.cmd_pub.publish(cmd_msg)
+        
+        return
+
+def main():
+    """ the main() function """
+    rospy.init_node('trajectory')
+    trajectory = Trajectory()
+    rospy.spin()
+
+if __name__ == '__main__':
+    try:
+        main()
+    except rospy.ROSInterruptException:
+        pass
